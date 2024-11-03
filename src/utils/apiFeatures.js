@@ -1,0 +1,68 @@
+const { DB_FILTERING_EXCLUDED_PROPS } = require('../helpers/constants');
+
+class APIFeatures {
+  constructor(query, queryString) {
+    this.query = query;
+    this.queryString = queryString;
+  }
+
+  filter() {
+    const queryObj = { ...this.queryString };
+    const excludedFields = DB_FILTERING_EXCLUDED_PROPS || [];
+    excludedFields.forEach((el) => delete queryObj[el]);
+
+    // Advanced filtering
+    let queryStr = JSON.stringify(queryObj);
+    queryStr = queryStr.replace(/\b(gte|gt|lte|lt|eq|ne|in|nin)\b/g, (match) => `$${match}`);
+
+    // console.log('Incoming query filters:', this.query.getQuery());
+
+    this.query = this.query.find(JSON.parse(queryStr));
+
+    // console.log('Final query filters:', this.query.getQuery());
+
+    return this;
+  }
+
+  sort() {
+    if (this.queryString.sort) {
+      const sortBy = this.queryString.sort.split(',').join(' ');
+      this.query = this.query.sort(sortBy);
+    } else {
+      this.query = this.query.sort('-createdAt');
+    }
+
+    return this;
+  }
+
+  limitFields() {
+    if (this.queryString.fields) {
+      const fields = this.queryString.fields.split(',').join(' ');
+      this.query = this.query.select(fields);
+    } else {
+      this.query = this.query.select('-__v');
+    }
+
+    return this;
+  }
+
+  populate(popOptions) {
+    if (popOptions) {
+      this.query = this.query.populate(popOptions);
+    }
+
+    return this;
+  }
+
+  paginate() {
+    const page = this.queryString.page * 1 || 1;
+    const limit = this.queryString.limit * 1 || 100;
+    const offset = (page - 1) * limit;
+
+    this.query = this.query.skip(offset).limit(limit);
+
+    return this;
+  }
+}
+
+module.exports = APIFeatures;

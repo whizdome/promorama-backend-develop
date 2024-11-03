@@ -1,0 +1,19 @@
+env:
+  commonjs: true
+  es2021: true
+  node: true
+extends:
+  - airbnb-base
+  - prettier
+overrides: []
+parserOptions:
+  ecmaVersion: latest
+rules:
+  arrow-body-style: off
+  prefer-arrow-callback": off
+  func-names: off
+  no-plusplus: off
+  no-useless-escape: off
+  no-underscore-dangle: off
+  no-nested-ternary": off
+  no-console: off
