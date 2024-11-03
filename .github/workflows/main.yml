@@ -22,18 +22,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Configure AWS credentials and set ECR URL
+      - name: Configure AWS credentials
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           REPO_NAME=my-app
+          FULL_ECR_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPO_NAME}"
           echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" >> $GITHUB_ENV
-          
-      - name: Create ECR repository
-        id: create-ecr
-        run: |
-          REPO_NAME=my-app
-          aws ecr create-repository --repository-name $REPO_NAME --region $AWS_REGION || echo "Repository already exists."
-          echo "ECR_REPO_URL=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPO_NAME}" >> $GITHUB_ENV
+          echo "ECR_REPO_URL=${FULL_ECR_URL}" >> $GITHUB_ENV
 
       - name: Log in to Amazon ECR
         run: |
@@ -51,12 +46,17 @@ jobs:
       - name: Build and tag Docker image
         run: |
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
+          FULL_IMAGE_URL="${ECR_REPO_URL}:${IMAGE_TAG}"
+          
           echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
-          docker build -t ${ECR_REPO_URL}:${IMAGE_TAG} .
-          docker tag ${ECR_REPO_URL}:${IMAGE_TAG} ${ECR_REPO_URL}:latest
+          echo "Building image: ${FULL_IMAGE_URL}"
+          
+          docker build -t ${FULL_IMAGE_URL} .
+          docker tag ${FULL_IMAGE_URL} ${ECR_REPO_URL}:latest
 
       - name: Push Docker image to ECR
         run: |
+          echo "Pushing image: ${ECR_REPO_URL}:${IMAGE_TAG}"
           docker push ${ECR_REPO_URL}:${IMAGE_TAG}
           docker push ${ECR_REPO_URL}:latest
 
@@ -158,14 +158,26 @@ jobs:
           # Clean up the secret file
           rm app-secrets.yaml
 
+      - name: Ensure ECR repository exists
+        run: |
+          aws ecr describe-repositories --repository-names my-app --region ${AWS_REGION} || \
+          aws ecr create-repository --repository-name my-app --region ${AWS_REGION}
+
       - name: Deploy to EKS
         run: |
+          # Debug information
+          echo "ECR URL: ${{needs.build-and-push.outputs.ecr_repo_url}}"
+          echo "Image Tag: ${{needs.build-and-push.outputs.image_tag}}"
+          
+          FULL_IMAGE_URL="${{needs.build-and-push.outputs.ecr_repo_url}}:${{needs.build-and-push.outputs.image_tag}}"
+          echo "Full Image URL: ${FULL_IMAGE_URL}"
+
           cat <<EOF > deployment.yaml
           apiVersion: apps/v1
           kind: Deployment
           metadata:
             name: my-app
-            namespace: ${KUBE_NAMESPACE}
+            namespace: default
           spec:
             replicas: 2
             selector:
@@ -180,49 +192,43 @@ jobs:
                 - name: ecr-secret
                 containers:
                 - name: my-app
-                  image: "${{needs.build-and-push.outputs.ecr_repo_url}}:latest"
+                  image: ${FULL_IMAGE_URL}
                   imagePullPolicy: Always
                   ports:
                   - containerPort: 3000
-                  # Add environment variables from secrets
                   envFrom:
                     - secretRef:
                         name: app-secrets
                   resources:
                     requests:
                       cpu: "100m"
-                      memory: "256Mi"  # Increased for Node.js memory requirements
+                      memory: "256Mi"
                     limits:
                       cpu: "500m"
                       memory: "512Mi"
-                  livenessProbe:
-                    httpGet:
-                      path: /health
-                      port: 3000
-                    initialDelaySeconds: 60
-                    periodSeconds: 15
-                  readinessProbe:
-                    httpGet:
-                      path: /health
-                      port: 3000
-                    initialDelaySeconds: 30
-                    periodSeconds: 10
           EOF
 
-          # Debug information
-          echo "Using image: ${{needs.build-and-push.outputs.ecr_repo_url}}:${{needs.build-and-push.outputs.image_tag}}"
-          
+          # Debug the deployment file
+          echo "=== Deployment YAML ==="
+          cat deployment.yaml
+
+          # Apply the deployment
           kubectl apply -f deployment.yaml
+
+          # Debug pod status
+          echo "=== Pod Status ==="
+          kubectl get pods -n default -l app=my-app
+          kubectl describe pods -n default -l app=my-app
 
       - name: Verify deployment
         run: |
-          kubectl rollout status deployment/my-app -n ${KUBE_NAMESPACE} --timeout=180s
+          kubectl rollout status deployment/my-app -n default --timeout=180s
 
       - name: Print Service URL
         run: |
           echo "Waiting for LoadBalancer to be ready..."
           sleep 30
-          echo "Service URL: $(kubectl get service my-app-service -n ${KUBE_NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+          echo "Service URL: $(kubectl get service my-app-service -n default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
 
       - name: Debug namespace and deployment
         run: |
