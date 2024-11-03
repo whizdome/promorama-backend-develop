@@ -42,17 +42,23 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: "20.x"
+          cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
-
-      - name: Build Next.js app
-        run: npm run build
+        run: npm ci
 
       - name: Build and tag Docker image
         run: |
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
-          docker build -t ${{ env.ECR_REPO_URL }}:${IMAGE_TAG} .
+          docker build \
+            --build-arg MONGODB_URI=${{ secrets.MONGODB_URI }} \
+            --build-arg JWT_SECRET=${{ secrets.JWT_SECRET }} \
+            --build-arg SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }} \
+            --build-arg CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }} \
+            --build-arg CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }} \
+            --build-arg CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }} \
+            --build-arg REDIS_URL=${{ secrets.REDIS_URL }} \
+            -t ${{ env.ECR_REPO_URL }}:${IMAGE_TAG} .
           docker tag ${{ env.ECR_REPO_URL }}:${IMAGE_TAG} ${{ env.ECR_REPO_URL }}:latest
           echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
 
@@ -101,6 +107,26 @@ jobs:
 
       - name: Deploy to EKS
         run: |
+          # Create Kubernetes secrets first
+          cat <<EOF > secrets.yaml
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: app-secrets
+            namespace: ${KUBE_NAMESPACE}
+          type: Opaque
+          data:
+            MONGODB_URI: $(echo -n "${{ secrets.MONGODB_URI }}" | base64)
+            JWT_SECRET: $(echo -n "${{ secrets.JWT_SECRET }}" | base64)
+            SENDGRID_API_KEY: $(echo -n "${{ secrets.SENDGRID_API_KEY }}" | base64)
+            CLOUDINARY_CLOUD_NAME: $(echo -n "${{ secrets.CLOUDINARY_CLOUD_NAME }}" | base64)
+            CLOUDINARY_API_KEY: $(echo -n "${{ secrets.CLOUDINARY_API_KEY }}" | base64)
+            CLOUDINARY_API_SECRET: $(echo -n "${{ secrets.CLOUDINARY_API_SECRET }}" | base64)
+            REDIS_URL: $(echo -n "${{ secrets.REDIS_URL }}" | base64)
+          EOF
+
+          kubectl apply -f secrets.yaml
+
           cat <<EOF > deployment.yaml
           apiVersion: apps/v1
           kind: Deployment
@@ -127,6 +153,9 @@ jobs:
                   imagePullPolicy: Always
                   ports:
                   - containerPort: 3000
+                  envFrom:
+                    - secretRef:
+                        name: app-secrets
                   resources:
                     requests:
                       cpu: "100m"
