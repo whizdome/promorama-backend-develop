@@ -22,9 +22,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials and set ECR URL
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REPO_NAME=my-app
           echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" >> $GITHUB_ENV
           
       - name: Create ECR repository
@@ -50,22 +51,14 @@ jobs:
       - name: Build and tag Docker image
         run: |
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
-          docker build \
-            --build-arg MONGODB_URI=${{ secrets.MONGODB_URI }} \
-            --build-arg JWT_SECRET=${{ secrets.JWT_SECRET }} \
-            --build-arg SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }} \
-            --build-arg CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }} \
-            --build-arg CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }} \
-            --build-arg CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }} \
-            --build-arg REDIS_URL=${{ secrets.REDIS_URL }} \
-            -t ${{ env.ECR_REPO_URL }}:${IMAGE_TAG} .
-          docker tag ${{ env.ECR_REPO_URL }}:${IMAGE_TAG} ${{ env.ECR_REPO_URL }}:latest
           echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
+          docker build -t ${ECR_REPO_URL}:${IMAGE_TAG} .
+          docker tag ${ECR_REPO_URL}:${IMAGE_TAG} ${ECR_REPO_URL}:latest
 
       - name: Push Docker image to ECR
         run: |
-          docker push ${{ env.ECR_REPO_URL }}:${{ env.IMAGE_TAG }}
-          docker push ${{ env.ECR_REPO_URL }}:latest
+          docker push ${ECR_REPO_URL}:${IMAGE_TAG}
+          docker push ${ECR_REPO_URL}:latest
 
   deploy-to-eks:
     needs: build-and-push
@@ -187,7 +180,7 @@ jobs:
                 - name: ecr-secret
                 containers:
                 - name: my-app
-                  image: ${{needs.build-and-push.outputs.ecr_repo_url}}:${{needs.build-and-push.outputs.image_tag}}
+                  image: "${{needs.build-and-push.outputs.ecr_repo_url}}:latest"
                   imagePullPolicy: Always
                   ports:
                   - containerPort: 3000
@@ -216,6 +209,9 @@ jobs:
                     periodSeconds: 10
           EOF
 
+          # Debug information
+          echo "Using image: ${{needs.build-and-push.outputs.ecr_repo_url}}:${{needs.build-and-push.outputs.image_tag}}"
+          
           kubectl apply -f deployment.yaml
 
       - name: Verify deployment
@@ -227,3 +223,10 @@ jobs:
           echo "Waiting for LoadBalancer to be ready..."
           sleep 30
           echo "Service URL: $(kubectl get service my-app-service -n ${KUBE_NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+
+      - name: Debug namespace and deployment
+        run: |
+          echo "Current namespace: ${KUBE_NAMESPACE}"
+          kubectl get pods -n ${KUBE_NAMESPACE} -l app=my-app
+          kubectl describe deployment my-app -n ${KUBE_NAMESPACE}
+          kubectl get events -n ${KUBE_NAMESPACE} --sort-by='.lastTimestamp'
