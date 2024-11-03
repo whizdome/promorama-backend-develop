@@ -1,0 +1,174 @@
+name: CI/CD Pipeline to build, push to ECR and deploy to EKS
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+    outputs:
+      ecr_repo_url: ${{ env.ECR_REPO_URL }}
+      image_tag: ${{ env.IMAGE_TAG }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" >> $GITHUB_ENV
+          
+      - name: Create ECR repository
+        id: create-ecr
+        run: |
+          REPO_NAME=my-app
+          aws ecr create-repository --repository-name $REPO_NAME --region $AWS_REGION || echo "Repository already exists."
+          echo "ECR_REPO_URL=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPO_NAME}" >> $GITHUB_ENV
+
+      - name: Log in to Amazon ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "20.x"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Next.js app
+        run: npm run build
+
+      - name: Build and tag Docker image
+        run: |
+          IMAGE_TAG=$(date +%Y%m%d%H%M%S)
+          docker build -t ${{ env.ECR_REPO_URL }}:${IMAGE_TAG} .
+          docker tag ${{ env.ECR_REPO_URL }}:${IMAGE_TAG} ${{ env.ECR_REPO_URL }}:latest
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
+
+      - name: Push Docker image to ECR
+        run: |
+          docker push ${{ env.ECR_REPO_URL }}:${{ env.IMAGE_TAG }}
+          docker push ${{ env.ECR_REPO_URL }}:latest
+
+  deploy-to-eks:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
+      KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
+    steps:
+      - name: Configure AWS credentials
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" >> $GITHUB_ENV
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Configure kubectl for EKS
+        run: |
+          aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER_NAME
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace ${KUBE_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create ECR pull secret
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | \
+          kubectl create secret docker-registry ecr-secret \
+            --docker-server=${{needs.build-and-push.outputs.ecr_repo_url}} \
+            --docker-username=AWS \
+            --docker-password-stdin \
+            --namespace=${KUBE_NAMESPACE} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy to EKS
+        run: |
+          cat <<EOF > deployment.yaml
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: my-app
+            namespace: ${KUBE_NAMESPACE}
+            annotations:
+              kubernetes.io/change-cause: "Deploy ${{needs.build-and-push.outputs.image_tag}} from GitHub Actions"
+          spec:
+            replicas: 2
+            selector:
+              matchLabels:
+                app: my-app
+            template:
+              metadata:
+                labels:
+                  app: my-app
+              spec:
+                imagePullSecrets:
+                - name: ecr-secret
+                containers:
+                - name: my-app
+                  image: ${{needs.build-and-push.outputs.ecr_repo_url}}:${{needs.build-and-push.outputs.image_tag}}
+                  imagePullPolicy: Always
+                  ports:
+                  - containerPort: 3000
+                  resources:
+                    requests:
+                      cpu: "100m"
+                      memory: "128Mi"
+                    limits:
+                      cpu: "500m"
+                      memory: "512Mi"
+                  livenessProbe:
+                    httpGet:
+                      path: /health
+                      port: 3000
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+                  readinessProbe:
+                    httpGet:
+                      path: /health
+                      port: 3000
+                    initialDelaySeconds: 5
+                    periodSeconds: 5
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: my-app-service
+            namespace: ${KUBE_NAMESPACE}
+          spec:
+            type: LoadBalancer
+            ports:
+            - port: 80
+              targetPort: 3000
+            selector:
+              app: my-app
+          EOF
+
+          kubectl apply -f deployment.yaml
+
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/my-app -n ${KUBE_NAMESPACE} --timeout=180s
+
+      - name: Print Service URL
+        run: |
+          echo "Waiting for LoadBalancer to be ready..."
+          sleep 30
+          echo "Service URL: $(kubectl get service my-app-service -n ${KUBE_NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
