@@ -110,6 +110,27 @@ jobs:
 
       - name: Create application secrets
         run: |
+          # Create base64 encoded values first
+          ADMIN_EMAIL_B64=$(echo -n "${{ secrets.ADMIN_EMAIL }}" | base64 -w 0)
+          ADMIN_FIRST_NAME_B64=$(echo -n "${{ secrets.ADMIN_FIRST_NAME }}" | base64 -w 0)
+          ADMIN_LAST_NAME_B64=$(echo -n "${{ secrets.ADMIN_LAST_NAME }}" | base64 -w 0)
+          ADMIN_PASSWORD_B64=$(echo -n "${{ secrets.ADMIN_PASSWORD }}" | base64 -w 0)
+          ADMIN_PHONE_NUMBER_B64=$(echo -n "${{ secrets.ADMIN_PHONE_NUMBER }}" | base64 -w 0)
+          CLOUDINARY_API_KEY_B64=$(echo -n "${{ secrets.CLOUDINARY_API_KEY }}" | base64 -w 0)
+          CLOUDINARY_API_SECRET_B64=$(echo -n "${{ secrets.CLOUDINARY_API_SECRET }}" | base64 -w 0)
+          CLOUDINARY_CLOUD_NAME_B64=$(echo -n "${{ secrets.CLOUDINARY_CLOUD_NAME }}" | base64 -w 0)
+          FIREBASE_CLIENT_EMAIL_B64=$(echo -n "${{ secrets.FIREBASE_CLIENT_EMAIL }}" | base64 -w 0)
+          FIREBASE_PRIVATE_KEY_B64=$(echo -n "${{ secrets.FIREBASE_PRIVATE_KEY }}" | base64 -w 0)
+          FIREBASE_PROJECT_ID_B64=$(echo -n "${{ secrets.FIREBASE_PROJECT_ID }}" | base64 -w 0)
+          JWT_EXPIRES_IN_B64=$(echo -n "${{ secrets.JWT_EXPIRES_IN }}" | base64 -w 0)
+          JWT_SECRET_B64=$(echo -n "${{ secrets.JWT_SECRET }}" | base64 -w 0)
+          MONGO_URI_B64=$(echo -n "${{ secrets.MONGO_URI }}" | base64 -w 0)
+          NODE_ENV_B64=$(echo -n "production" | base64 -w 0)
+          NODE_OPTIONS_B64=$(echo -n "${{ secrets.NODE_OPTIONS }}" | base64 -w 0)
+          SENDGRID_API_KEY_B64=$(echo -n "${{ secrets.SENDGRID_API_KEY }}" | base64 -w 0)
+          SIGN_UP_URL_B64=$(echo -n "${{ secrets.SIGN_UP_URL }}" | base64 -w 0)
+
+          # Create the secret manifest
           cat <<EOF > app-secrets.yaml
           apiVersion: v1
           kind: Secret
@@ -118,27 +139,31 @@ jobs:
             namespace: ${KUBE_NAMESPACE}
           type: Opaque
           data:
-            ADMIN_EMAIL: $(echo -n "${{ secrets.ADMIN_EMAIL }}" | base64)
-            ADMIN_FIRST_NAME: $(echo -n "${{ secrets.ADMIN_FIRST_NAME }}" | base64)
-            ADMIN_LAST_NAME: $(echo -n "${{ secrets.ADMIN_LAST_NAME }}" | base64)
-            ADMIN_PASSWORD: $(echo -n "${{ secrets.ADMIN_PASSWORD }}" | base64)
-            ADMIN_PHONE_NUMBER: $(echo -n "${{ secrets.ADMIN_PHONE_NUMBER }}" | base64)
-            CLOUDINARY_API_KEY: $(echo -n "${{ secrets.CLOUDINARY_API_KEY }}" | base64)
-            CLOUDINARY_API_SECRET: $(echo -n "${{ secrets.CLOUDINARY_API_SECRET }}" | base64)
-            CLOUDINARY_CLOUD_NAME: $(echo -n "${{ secrets.CLOUDINARY_CLOUD_NAME }}" | base64)
-            FIREBASE_CLIENT_EMAIL: $(echo -n "${{ secrets.FIREBASE_CLIENT_EMAIL }}" | base64)
-            FIREBASE_PRIVATE_KEY: $(echo -n "${{ secrets.FIREBASE_PRIVATE_KEY }}" | base64)
-            FIREBASE_PROJECT_ID: $(echo -n "${{ secrets.FIREBASE_PROJECT_ID }}" | base64)
-            JWT_EXPIRES_IN: $(echo -n "${{ secrets.JWT_EXPIRES_IN }}" | base64)
-            JWT_SECRET: $(echo -n "${{ secrets.JWT_SECRET }}" | base64)
-            MONGO_URI: $(echo -n "${{ secrets.MONGO_URI }}" | base64)
-            NODE_ENV: $(echo -n "production" | base64)
-            NODE_OPTIONS: $(echo -n "${{ secrets.NODE_OPTIONS }}" | base64)
-            SENDGRID_API_KEY: $(echo -n "${{ secrets.SENDGRID_API_KEY }}" | base64)
-            SIGN_UP_URL: $(echo -n "${{ secrets.SIGN_UP_URL }}" | base64)
+            ADMIN_EMAIL: "${ADMIN_EMAIL_B64}"
+            ADMIN_FIRST_NAME: "${ADMIN_FIRST_NAME_B64}"
+            ADMIN_LAST_NAME: "${ADMIN_LAST_NAME_B64}"
+            ADMIN_PASSWORD: "${ADMIN_PASSWORD_B64}"
+            ADMIN_PHONE_NUMBER: "${ADMIN_PHONE_NUMBER_B64}"
+            CLOUDINARY_API_KEY: "${CLOUDINARY_API_KEY_B64}"
+            CLOUDINARY_API_SECRET: "${CLOUDINARY_API_SECRET_B64}"
+            CLOUDINARY_CLOUD_NAME: "${CLOUDINARY_CLOUD_NAME_B64}"
+            FIREBASE_CLIENT_EMAIL: "${FIREBASE_CLIENT_EMAIL_B64}"
+            FIREBASE_PRIVATE_KEY: "${FIREBASE_PRIVATE_KEY_B64}"
+            FIREBASE_PROJECT_ID: "${FIREBASE_PROJECT_ID_B64}"
+            JWT_EXPIRES_IN: "${JWT_EXPIRES_IN_B64}"
+            JWT_SECRET: "${JWT_SECRET_B64}"
+            MONGO_URI: "${MONGO_URI_B64}"
+            NODE_ENV: "${NODE_ENV_B64}"
+            NODE_OPTIONS: "${NODE_OPTIONS_B64}"
+            SENDGRID_API_KEY: "${SENDGRID_API_KEY_B64}"
+            SIGN_UP_URL: "${SIGN_UP_URL_B64}"
           EOF
-          
+
+          # Apply the secret
           kubectl apply -f app-secrets.yaml
+
+          # Clean up the secret file
+          rm app-secrets.yaml
 
       - name: Deploy to EKS
         run: |
