@@ -84,13 +84,16 @@ jobs:
 
       - name: Create ECR pull secret
         run: |
-          aws ecr get-login-password --region $AWS_REGION | \
+          # Get ECR registry URL
+          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          
+          # Create or update the secret
+          kubectl delete secret ecr-secret --namespace=${KUBE_NAMESPACE} --ignore-not-found
           kubectl create secret docker-registry ecr-secret \
-            --docker-server=${{ needs.build-and-push.outputs.ecr_repo_url }} \
-            --docker-username=AWS \
-            --docker-password-stdin \
             --namespace=${KUBE_NAMESPACE} \
-            --dry-run=client -o yaml | kubectl apply -f -
+            --docker-server=${ECR_REGISTRY} \
+            --docker-username=AWS \
+            --docker-password="$(aws ecr get-login-password --region ${AWS_REGION})"
 
       - name: Deploy to EKS
         run: |
