@@ -15,7 +15,10 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ secrets.AWS_REGION }}
-      REPO_NAME: "my-app"  # Hardcoded for now, or use ${{ secrets.ECR_REPO_NAME }}
+      REPO_NAME: "my-app"
+    outputs:
+      ecr_repo_url: ${{ steps.ecr-setup.outputs.ecr_repo_url }}
+      image_tag: ${{ steps.set_image_tag.outputs.image_tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -23,16 +26,13 @@ jobs:
       - name: Configure AWS credentials and set ECR URL
         id: ecr-setup
         run: |
-          # Get AWS Account ID
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "AWS Account ID: ${AWS_ACCOUNT_ID}"
           
-          # Set ECR Repository URL
           ECR_REPO_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPO_NAME}"
           echo "ECR_REPO_URL=${ECR_REPO_URL}" >> $GITHUB_ENV
           echo "ecr_repo_url=${ECR_REPO_URL}" >> $GITHUB_OUTPUT
           
-          # Debug output
           echo "Setting ECR Repository URL: ${ECR_REPO_URL}"
 
       - name: Create ECR repository
@@ -43,12 +43,6 @@ jobs:
 
       - name: Log in to Amazon ECR
         run: |
-          # Debug output
-          echo "AWS Region: ${AWS_REGION}"
-          echo "Repository Name: ${REPO_NAME}"
-          echo "ECR Repository URL: ${ECR_REPO_URL}"
-          
-          # Get ECR login password and login
           aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_URL}
 
       - name: Set up Node.js
@@ -62,31 +56,47 @@ jobs:
       - name: Build and tag Docker image
         id: set_image_tag
         run: |
+          # Set the image tag
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
-          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
           
-          # Debug output
-          echo "Setting Image Tag: ${IMAGE_TAG}"
+          # Debug information
+          echo "ECR Repository URL: ${ECR_REPO_URL}"
+          echo "Image Tag: ${IMAGE_TAG}"
+          echo "Full Image URL: ${ECR_REPO_URL}:${IMAGE_TAG}"
           
-          docker build -t ${ECR_REPO_URL}:${IMAGE_TAG} .
-          docker tag ${ECR_REPO_URL}:${IMAGE_TAG} ${ECR_REPO_URL}:latest
-      - name: Install Trivy
-        run: |
-          sudo apt-get install wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install trivy -y
+          # Build and tag the image
+          docker build -t "${ECR_REPO_URL}:${IMAGE_TAG}" .
+          docker tag "${ECR_REPO_URL}:${IMAGE_TAG}" "${ECR_REPO_URL}:latest"
+          
+          # List docker images to verify
+          docker images
 
-      # - name: Scan Docker image with Trivy
-      #   run: |
-      #     trivy image --exit-code 1 --severity HIGH,CRITICAL ${ECR_REPO_URL}:${IMAGE_TAG}
+      # - name: Run Trivy vulnerability scanner
+      #   uses: aquasecurity/trivy-action@master
+      #   with:
+      #     image-ref: "${ECR_REPO_URL}:${IMAGE_TAG}"
+      #     format: 'table'
+      #     exit-code: '1'
+      #     ignore-unfixed: true
+      #     vuln-type: 'os,library'
+      #     severity: 'HIGH,CRITICAL'
 
       - name: Push Docker image to ECR
-        if: success()  # Only push if the Trivy scan passes
         run: |
-          docker push ${ECR_REPO_URL}:${IMAGE_TAG}
-          docker push ${ECR_REPO_URL}:latest
+          # Debug information
+          echo "Pushing image to ECR"
+          echo "ECR Repository URL: ${ECR_REPO_URL}"
+          echo "Image Tag: ${IMAGE_TAG}"
+          echo "Full Image URL: ${ECR_REPO_URL}:${IMAGE_TAG}"
+          
+          # Push images with proper quoting
+          docker push "${ECR_REPO_URL}:${IMAGE_TAG}"
+          docker push "${ECR_REPO_URL}:latest"
+          
+          # Verify the push
+          aws ecr describe-images --repository-name ${REPO_NAME} --region ${AWS_REGION}
 
   deploy-to-eks:
     needs: build-and-push
