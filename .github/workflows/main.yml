@@ -1,4 +1,4 @@
-name: CI/CD Pipeline to build, push to ECR and deploy to EKS
+name: CI/CD Pipeline to build, push to ECR and deploy to AWS EKS
 
 on:
   push:
