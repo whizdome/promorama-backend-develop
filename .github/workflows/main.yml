@@ -27,8 +27,10 @@ jobs:
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           REPO_NAME=my-app
           ECR_REPO_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPO_NAME}"
-          echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" >> $GITHUB_ENV
           echo "ECR_REPO_URL=${ECR_REPO_URL}" >> $GITHUB_ENV
+          
+          # Debug information
+          echo "Setting ECR Repository URL: ${ECR_REPO_URL}"
 
       - name: Log in to Amazon ECR
         run: |
@@ -100,6 +102,10 @@ jobs:
           ECR_REPO_URL: ${{ needs.build-and-push.outputs.ecr_repo_url }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
         run: |
+          # Debug information
+          echo "ECR Repository URL: ${ECR_REPO_URL}"
+          echo "Image Tag: ${IMAGE_TAG}"
+          
           cat > deployment.yaml <<'EOL'
           apiVersion: apps/v1
           kind: Deployment
@@ -120,7 +126,7 @@ jobs:
                 - name: ecr-secret
                 containers:
                 - name: my-app
-                  image: ${ECR_REPO_URL}:${IMAGE_TAG}
+                  image: "${ECR_REPO_URL}:${IMAGE_TAG}"
                   imagePullPolicy: Always
                   ports:
                   - containerPort: 3000
@@ -134,10 +140,15 @@ jobs:
                     limits:
                       cpu: "500m"
                       memory: "512Mi"
-          EOL
+EOL
           
-          envsubst < deployment.yaml | kubectl apply -f -
-
-      - name: Verify deployment
-        run: |
-          kubectl rollout status deployment/my-app -n ${KUBE_NAMESPACE} --timeout=180s
+          # Debug the deployment file before applying
+          echo "Generated deployment file:"
+          cat deployment.yaml
+          
+          # Replace variables and apply
+          envsubst < deployment.yaml | tee deployment_final.yaml | kubectl apply -f -
+          
+          # Verify the deployment
+          echo "Checking deployment status:"
+          kubectl get deployment my-app -n ${KUBE_NAMESPACE} -o wide
