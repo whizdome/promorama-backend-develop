@@ -144,10 +144,10 @@ jobs:
                   resources:
                     requests:
                       cpu: "500m"
-                      memory: "2GB"
+                      memory: "2gb"
                     limits:
                       cpu: "1000m"
-                      memory: "3GB"
+                      memory: "3gb"
           EOF
           
           # Verify the deployment
