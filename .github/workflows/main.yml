@@ -102,11 +102,7 @@ jobs:
           ECR_REPO_URL: ${{ needs.build-and-push.outputs.ecr_repo_url }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
         run: |
-          # Debug information
-          echo "ECR Repository URL: ${ECR_REPO_URL}"
-          echo "Image Tag: ${IMAGE_TAG}"
-          
-          cat > deployment.yaml <<'EOL'
+          kubectl apply -f - <<EOF
           apiVersion: apps/v1
           kind: Deployment
           metadata:
@@ -126,7 +122,7 @@ jobs:
                 - name: ecr-secret
                 containers:
                 - name: my-app
-                  image: "${ECR_REPO_URL}:${IMAGE_TAG}"
+                  image: ${ECR_REPO_URL}:${IMAGE_TAG}
                   imagePullPolicy: Always
                   ports:
                   - containerPort: 3000
@@ -140,15 +136,4 @@ jobs:
                     limits:
                       cpu: "500m"
                       memory: "512Mi"
-EOL
-          
-          # Debug the deployment file before applying
-          echo "Generated deployment file:"
-          cat deployment.yaml
-          
-          # Replace variables and apply
-          envsubst < deployment.yaml | tee deployment_final.yaml | kubectl apply -f -
-          
-          # Verify the deployment
-          echo "Checking deployment status:"
-          kubectl get deployment my-app -n ${KUBE_NAMESPACE} -o wide
+          EOF
