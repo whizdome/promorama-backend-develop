@@ -15,33 +15,41 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ secrets.AWS_REGION }}
-      REPO_NAME: ${{ secrets.ECR_REPO_NAME }}  # Use the secret for the repo name
-    outputs:
-      ecr_repo_url: ${{ steps.set_ecr_url.outputs.ecr_repo_url }}
-      image_tag: ${{ steps.set_image_tag.outputs.image_tag }}
+      REPO_NAME: "my-app"  # Hardcoded for now, or use ${{ secrets.ECR_REPO_NAME }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Configure AWS credentials
-        id: set_ecr_url
+      - name: Configure AWS credentials and set ECR URL
+        id: ecr-setup
         run: |
+          # Get AWS Account ID
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "AWS Account ID: ${AWS_ACCOUNT_ID}"
+          
+          # Set ECR Repository URL
           ECR_REPO_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPO_NAME}"
-          echo "ecr_repo_url=${ECR_REPO_URL}" >> "$GITHUB_OUTPUT"
+          echo "ECR_REPO_URL=${ECR_REPO_URL}" >> $GITHUB_ENV
+          echo "ecr_repo_url=${ECR_REPO_URL}" >> $GITHUB_OUTPUT
           
           # Debug output
           echo "Setting ECR Repository URL: ${ECR_REPO_URL}"
 
-      - name: Create ECR repository if it doesn't exist
+      - name: Create ECR repository
         run: |
+          echo "Creating/checking ECR repository: ${REPO_NAME}"
           aws ecr describe-repositories --repository-names ${REPO_NAME} --region ${AWS_REGION} || \
           aws ecr create-repository --repository-name ${REPO_NAME} --region ${AWS_REGION}
 
       - name: Log in to Amazon ECR
         run: |
-          echo "Logging into ECR with URL: ${ECR_REPO_URL}"
-          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_URL}
+          # Debug output
+          echo "AWS Region: ${AWS_REGION}"
+          echo "Repository Name: ${REPO_NAME}"
+          echo "ECR Repository URL: ${ECR_REPO_URL}"
+          
+          # Get ECR login password and login
+          aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_URL}
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
