@@ -1,4 +1,4 @@
-name: CI/CD Pipeline to build, push to ECR and deploy to AWS EKS
+name: CI/CD Pipeline to build, push to ECR and deploy to EKS
 
 on:
   push:
@@ -84,14 +84,11 @@ jobs:
 
       - name: Create ECR pull secret
         run: |
-          # Get the ECR registry URL
-          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-          
-          # Create the secret
+          aws ecr get-login-password --region $AWS_REGION | \
           kubectl create secret docker-registry ecr-secret \
-            --docker-server=${ECR_REGISTRY} \
+            --docker-server=${{ needs.build-and-push.outputs.ecr_repo_url }} \
             --docker-username=AWS \
-            --docker-password=$(aws ecr get-login-password --region ${AWS_REGION}) \
+            --docker-password-stdin \
             --namespace=${KUBE_NAMESPACE} \
             --dry-run=client -o yaml | kubectl apply -f -
 
@@ -131,7 +128,7 @@ jobs:
                     limits:
                       cpu: "500m"
                       memory: "512Mi"
-          EOF
+EOF
 
           kubectl apply -f deployment.yaml
 
