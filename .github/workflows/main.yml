@@ -26,19 +26,18 @@ jobs:
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           REPO_NAME=my-app
-          FULL_ECR_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPO_NAME}"
+          ECR_REPO_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPO_NAME}"
           echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" >> $GITHUB_ENV
-          echo "ECR_REPO_URL=${FULL_ECR_URL}" >> $GITHUB_ENV
+          echo "ECR_REPO_URL=${ECR_REPO_URL}" >> $GITHUB_ENV
 
       - name: Log in to Amazon ECR
         run: |
-          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_URL}
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
           node-version: "20.x"
-          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
@@ -46,17 +45,12 @@ jobs:
       - name: Build and tag Docker image
         run: |
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
-          FULL_IMAGE_URL="${ECR_REPO_URL}:${IMAGE_TAG}"
-          
           echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
-          echo "Building image: ${FULL_IMAGE_URL}"
-          
-          docker build -t ${FULL_IMAGE_URL} .
-          docker tag ${FULL_IMAGE_URL} ${ECR_REPO_URL}:latest
+          docker build -t ${ECR_REPO_URL}:${IMAGE_TAG} .
+          docker tag ${ECR_REPO_URL}:${IMAGE_TAG} ${ECR_REPO_URL}:latest
 
       - name: Push Docker image to ECR
         run: |
-          echo "Pushing image: ${ECR_REPO_URL}:${IMAGE_TAG}"
           docker push ${ECR_REPO_URL}:${IMAGE_TAG}
           docker push ${ECR_REPO_URL}:latest
 
@@ -90,94 +84,22 @@ jobs:
 
       - name: Create ECR pull secret
         run: |
-          # Get the ECR registry URL
-          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-          
-          # Create the secret
+          aws ecr get-login-password --region $AWS_REGION | \
           kubectl create secret docker-registry ecr-secret \
-            --docker-server=${ECR_REGISTRY} \
+            --docker-server=${{ needs.build-and-push.outputs.ecr_repo_url }} \
             --docker-username=AWS \
-            --docker-password=$(aws ecr get-login-password --region ${AWS_REGION}) \
+            --docker-password-stdin \
             --namespace=${KUBE_NAMESPACE} \
             --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Create application secrets
-        run: |
-          # Create base64 encoded values first
-          ADMIN_EMAIL_B64=$(echo -n "${{ secrets.ADMIN_EMAIL }}" | base64 -w 0)
-          ADMIN_FIRST_NAME_B64=$(echo -n "${{ secrets.ADMIN_FIRST_NAME }}" | base64 -w 0)
-          ADMIN_LAST_NAME_B64=$(echo -n "${{ secrets.ADMIN_LAST_NAME }}" | base64 -w 0)
-          ADMIN_PASSWORD_B64=$(echo -n "${{ secrets.ADMIN_PASSWORD }}" | base64 -w 0)
-          ADMIN_PHONE_NUMBER_B64=$(echo -n "${{ secrets.ADMIN_PHONE_NUMBER }}" | base64 -w 0)
-          CLOUDINARY_API_KEY_B64=$(echo -n "${{ secrets.CLOUDINARY_API_KEY }}" | base64 -w 0)
-          CLOUDINARY_API_SECRET_B64=$(echo -n "${{ secrets.CLOUDINARY_API_SECRET }}" | base64 -w 0)
-          CLOUDINARY_CLOUD_NAME_B64=$(echo -n "${{ secrets.CLOUDINARY_CLOUD_NAME }}" | base64 -w 0)
-          FIREBASE_CLIENT_EMAIL_B64=$(echo -n "${{ secrets.FIREBASE_CLIENT_EMAIL }}" | base64 -w 0)
-          FIREBASE_PRIVATE_KEY_B64=$(echo -n "${{ secrets.FIREBASE_PRIVATE_KEY }}" | base64 -w 0)
-          FIREBASE_PROJECT_ID_B64=$(echo -n "${{ secrets.FIREBASE_PROJECT_ID }}" | base64 -w 0)
-          JWT_EXPIRES_IN_B64=$(echo -n "${{ secrets.JWT_EXPIRES_IN }}" | base64 -w 0)
-          JWT_SECRET_B64=$(echo -n "${{ secrets.JWT_SECRET }}" | base64 -w 0)
-          MONGO_URI_B64=$(echo -n "${{ secrets.MONGO_URI }}" | base64 -w 0)
-          NODE_ENV_B64=$(echo -n "production" | base64 -w 0)
-          NODE_OPTIONS_B64=$(echo -n "${{ secrets.NODE_OPTIONS }}" | base64 -w 0)
-          SENDGRID_API_KEY_B64=$(echo -n "${{ secrets.SENDGRID_API_KEY }}" | base64 -w 0)
-          SIGN_UP_URL_B64=$(echo -n "${{ secrets.SIGN_UP_URL }}" | base64 -w 0)
-
-          # Create the secret manifest
-          cat <<EOF > app-secrets.yaml
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: app-secrets
-            namespace: ${KUBE_NAMESPACE}
-          type: Opaque
-          data:
-            ADMIN_EMAIL: "${ADMIN_EMAIL_B64}"
-            ADMIN_FIRST_NAME: "${ADMIN_FIRST_NAME_B64}"
-            ADMIN_LAST_NAME: "${ADMIN_LAST_NAME_B64}"
-            ADMIN_PASSWORD: "${ADMIN_PASSWORD_B64}"
-            ADMIN_PHONE_NUMBER: "${ADMIN_PHONE_NUMBER_B64}"
-            CLOUDINARY_API_KEY: "${CLOUDINARY_API_KEY_B64}"
-            CLOUDINARY_API_SECRET: "${CLOUDINARY_API_SECRET_B64}"
-            CLOUDINARY_CLOUD_NAME: "${CLOUDINARY_CLOUD_NAME_B64}"
-            FIREBASE_CLIENT_EMAIL: "${FIREBASE_CLIENT_EMAIL_B64}"
-            FIREBASE_PRIVATE_KEY: "${FIREBASE_PRIVATE_KEY_B64}"
-            FIREBASE_PROJECT_ID: "${FIREBASE_PROJECT_ID_B64}"
-            JWT_EXPIRES_IN: "${JWT_EXPIRES_IN_B64}"
-            JWT_SECRET: "${JWT_SECRET_B64}"
-            MONGO_URI: "${MONGO_URI_B64}"
-            NODE_ENV: "${NODE_ENV_B64}"
-            NODE_OPTIONS: "${NODE_OPTIONS_B64}"
-            SENDGRID_API_KEY: "${SENDGRID_API_KEY_B64}"
-            SIGN_UP_URL: "${SIGN_UP_URL_B64}"
-          EOF
-
-          # Apply the secret
-          kubectl apply -f app-secrets.yaml
-
-          # Clean up the secret file
-          rm app-secrets.yaml
-
-      - name: Ensure ECR repository exists
-        run: |
-          aws ecr describe-repositories --repository-names my-app --region ${AWS_REGION} || \
-          aws ecr create-repository --repository-name my-app --region ${AWS_REGION}
-
       - name: Deploy to EKS
         run: |
-          # Debug information
-          echo "ECR URL: ${{needs.build-and-push.outputs.ecr_repo_url}}"
-          echo "Image Tag: ${{needs.build-and-push.outputs.image_tag}}"
-          
-          FULL_IMAGE_URL="${{needs.build-and-push.outputs.ecr_repo_url}}:${{needs.build-and-push.outputs.image_tag}}"
-          echo "Full Image URL: ${FULL_IMAGE_URL}"
-
           cat <<EOF > deployment.yaml
           apiVersion: apps/v1
           kind: Deployment
           metadata:
             name: my-app
-            namespace: default
+            namespace: ${KUBE_NAMESPACE}
           spec:
             replicas: 2
             selector:
@@ -192,7 +114,7 @@ jobs:
                 - name: ecr-secret
                 containers:
                 - name: my-app
-                  image: ${FULL_IMAGE_URL}
+                  image: "${{ needs.build-and-push.outputs.ecr_repo_url }}:${{ needs.build-and-push.outputs.image_tag }}"
                   imagePullPolicy: Always
                   ports:
                   - containerPort: 3000
@@ -206,33 +128,10 @@ jobs:
                     limits:
                       cpu: "500m"
                       memory: "512Mi"
-          EOF
+EOF
 
-          # Debug the deployment file
-          echo "=== Deployment YAML ==="
-          cat deployment.yaml
-
-          # Apply the deployment
           kubectl apply -f deployment.yaml
-
-          # Debug pod status
-          echo "=== Pod Status ==="
-          kubectl get pods -n default -l app=my-app
-          kubectl describe pods -n default -l app=my-app
 
       - name: Verify deployment
         run: |
-          kubectl rollout status deployment/my-app -n default --timeout=180s
-
-      - name: Print Service URL
-        run: |
-          echo "Waiting for LoadBalancer to be ready..."
-          sleep 30
-          echo "Service URL: $(kubectl get service my-app-service -n default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
-
-      - name: Debug namespace and deployment
-        run: |
-          echo "Current namespace: ${KUBE_NAMESPACE}"
-          kubectl get pods -n ${KUBE_NAMESPACE} -l app=my-app
-          kubectl describe deployment my-app -n ${KUBE_NAMESPACE}
-          kubectl get events -n ${KUBE_NAMESPACE} --sort-by='.lastTimestamp'
+          kubectl rollout status deployment/my-app -n ${KUBE_NAMESPACE} --timeout=180s
