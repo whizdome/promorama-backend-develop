@@ -96,6 +96,9 @@ jobs:
             --docker-password="$(aws ecr get-login-password --region ${AWS_REGION})"
 
       - name: Deploy to EKS
+        env:
+          ECR_REPO_URL: ${{ needs.build-and-push.outputs.ecr_repo_url }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
         run: |
           cat > deployment.yaml << 'EOF'
           apiVersion: apps/v1
@@ -114,30 +117,27 @@ jobs:
                   app: my-app
               spec:
                 imagePullSecrets:
-                - name: ecr-secret
+                  - name: ecr-secret
                 containers:
-                - name: my-app
-                  image: ${ECR_REPO_URL}:${IMAGE_TAG}
-                  imagePullPolicy: Always
-                  ports:
-                  - containerPort: 3000
-                  envFrom:
-                  - secretRef:
-                      name: app-secrets
-                  resources:
-                    requests:
-                      cpu: "100m"
-                      memory: "256Mi"
-                    limits:
-                      cpu: "500m"
-                      memory: "512Mi"
-          EOF
+                  - name: my-app
+                    image: ${ECR_REPO_URL}:${IMAGE_TAG}
+                    imagePullPolicy: Always
+                    ports:
+                      - containerPort: 3000
+                    envFrom:
+                      - secretRef:
+                          name: app-secrets
+                    resources:
+                      requests:
+                        cpu: "100m"
+                        memory: "256Mi"
+                      limits:
+                        cpu: "500m"
+                        memory: "512Mi"
+EOF
 
-          # Replace environment variables in the deployment file
-          envsubst < deployment.yaml > deployment_final.yaml
-          
-          # Apply the deployment
-          kubectl apply -f deployment_final.yaml
+          # Replace environment variables
+          envsubst < deployment.yaml | kubectl apply -f -
 
       - name: Verify deployment
         run: |
