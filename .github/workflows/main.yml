@@ -128,7 +128,7 @@ jobs:
                     limits:
                       cpu: "500m"
                       memory: "512Mi"
-EOF
+          EOF
 
           kubectl apply -f deployment.yaml
 
