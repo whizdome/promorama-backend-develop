@@ -143,11 +143,11 @@ jobs:
                       name: app-secrets
                   resources:
                     requests:
-                      cpu: "100m"
-                      memory: "256Mi"
-                    limits:
                       cpu: "500m"
-                      memory: "512Mi"
+                      memory: "2GB"
+                    limits:
+                      cpu: "1000m"
+                      memory: "3GB"
           EOF
           
           # Verify the deployment
