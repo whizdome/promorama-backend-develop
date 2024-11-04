@@ -33,6 +33,11 @@ jobs:
           # Debug output
           echo "Setting ECR Repository URL: ${ECR_REPO_URL}"
 
+      - name: Create ECR repository if it doesn't exist
+        run: |
+          aws ecr describe-repositories --repository-names ${REPO_NAME} --region ${AWS_REGION} || \
+          aws ecr create-repository --repository-name ${REPO_NAME} --region ${AWS_REGION}
+
       - name: Log in to Amazon ECR
         run: |
           echo "Logging into ECR with URL: ${ECR_REPO_URL}"
