@@ -70,14 +70,17 @@ jobs:
           
           docker build -t ${ECR_REPO_URL}:${IMAGE_TAG} .
           docker tag ${ECR_REPO_URL}:${IMAGE_TAG} ${ECR_REPO_URL}:latest
-
       - name: Install Trivy
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -
+          sudo apt-get install wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install trivy -y
 
       - name: Scan Docker image with Trivy
         run: |
-          ./trivy image --exit-code 1 --severity HIGH,CRITICAL ${ECR_REPO_URL}:${IMAGE_TAG}
+          trivy image --exit-code 1 --severity HIGH,CRITICAL ${ECR_REPO_URL}:${IMAGE_TAG}
 
       - name: Push Docker image to ECR
         if: success()  # Only push if the Trivy scan passes
